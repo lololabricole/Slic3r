@@ -13,6 +13,9 @@ use Wx::Event qw(EVT_BUTTON EVT_COMMAND EVT_KEY_DOWN EVT_LIST_ITEM_ACTIVATED
     EVT_LIST_ITEM_DESELECTED EVT_LIST_ITEM_SELECTED EVT_MOUSE_EVENTS EVT_PAINT EVT_TOOL 
     EVT_CHOICE EVT_COMBOBOX EVT_TIMER EVT_NOTEBOOK_PAGE_CHANGED);
 use base 'Wx::Panel';
+our $qs_last_input_file;
+our $qs_last_output_file;
+our $last_config;
 
 use constant TB_ADD             => &Wx::NewId;
 use constant TB_REMOVE          => &Wx::NewId;
@@ -193,6 +196,7 @@ sub new {
     $self->{btn_export_gcode} = Wx::Button->new($self, -1, "Export G-code…", wxDefaultPosition, [-1, 30], wxBU_LEFT);
     $self->{btn_send_gcode} = Wx::Button->new($self, -1, "Send to printer", wxDefaultPosition, [-1, 30], wxBU_LEFT);
     $self->{btn_export_stl} = Wx::Button->new($self, -1, "Export STL…", wxDefaultPosition, [-1, 30], wxBU_LEFT);
+    $self->{btn_export_svg} = Wx::Button->new($self, -1, "Slice to SV&G…", wxDefaultPosition, [-1, 30], wxBU_LEFT);
     #$self->{btn_export_gcode}->SetFont($Slic3r::GUI::small_font);
     #$self->{btn_export_stl}->SetFont($Slic3r::GUI::small_font);
     $self->{btn_send_gcode}->Hide;
@@ -206,6 +210,7 @@ sub new {
             export_gcode    cog_go.png
             send_gcode      arrow_up.png
             export_stl      brick_go.png
+            export_svg      brick_go.png
             
             increase        add.png
             decrease        delete.png
@@ -231,7 +236,9 @@ sub new {
         Slic3r::thread_cleanup();
     });
     EVT_BUTTON($self, $self->{btn_export_stl}, \&export_stl);
-    
+    EVT_BUTTON($self, $self->{btn_export_svg}, sub {
+        $self->export_svg_(save_as => 1, export_svg => 1)  
+    });
     if ($self->{htoolbar}) {
         EVT_TOOL($self, TB_ADD, sub { $self->add; });
         EVT_TOOL($self, TB_REMOVE, sub { $self->remove() }); # explicitly pass no argument to remove
@@ -385,6 +392,7 @@ sub new {
         my $buttons_sizer = Wx::BoxSizer->new(wxHORIZONTAL);
         $buttons_sizer->AddStretchSpacer(1);
         $buttons_sizer->Add($self->{btn_export_stl}, 0, wxALIGN_RIGHT, 0);
+        $buttons_sizer->Add($self->{btn_export_svg}, 0, wxALIGN_RIGHT, 0);
         $buttons_sizer->Add($self->{btn_send_gcode}, 0, wxALIGN_RIGHT, 0);
         $buttons_sizer->Add($self->{btn_export_gcode}, 0, wxALIGN_RIGHT, 0);
         
@@ -1253,6 +1261,107 @@ sub send_gcode {
     }
 }
 
+sub export_svg_ {
+    my $self = shift;
+     my %params = @_;
+    return if !@{$self->{objects}};
+        # my $input_file = $self->_get_export_file('STL') or return;
+        # validate configuration
+        my $progress_dialog;
+        my $config = $self->Slic3r::GUI::MainFrame::config;
+        $config->validate;             
+        my $input_file;
+        my $dir = $Slic3r::GUI::Settings->{recent}{skein_directory} || $Slic3r::GUI::Settings->{recent}{config_directory} || '';
+        if (!$params{reslice}) {
+        my $dialog = Wx::FileDialog->new($self, 'Choose a file to slice (STL/OBJ/AMF):', $dir, "", &Slic3r::GUI::MODEL_WILDCARD, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+            if ($dialog->ShowModal != wxID_OK) {
+                $dialog->Destroy;
+                return;
+            }
+            $input_file = Slic3r::decode_path($dialog->GetPaths);
+            $dialog->Destroy;
+            $qs_last_input_file = $input_file unless $params{export_svg};
+        }
+         my $input_file_basename = basename($input_file);
+        $Slic3r::GUI::Settings->{recent}{skein_directory} = dirname($input_file);
+        wxTheApp->save_settings;
+        
+         my $print_center;
+        {
+            my $bed_shape = Slic3r::Polygon->new_scale(@{$config->bed_shape});
+            $print_center = Slic3r::Pointf->new_unscale(@{$bed_shape->bounding_box->center});
+        }
+        
+         my $sprint = Slic3r::Print::Simple->new(
+            print_center    => $print_center,
+            status_cb       => sub {
+                my ($percent, $message) = @_;
+                return if &Wx::wxVERSION_STRING !~ / 2\.(8\.|9\.[2-9])/;
+                $progress_dialog->Update($percent, "$message…");
+            },
+        );
+        
+        # keep model around
+        my $model = Slic3r::Model->read_from_file($input_file);
+        
+        $sprint->apply_config($config);
+        $sprint->set_model($model);
+        
+        {
+            my $extra = $self->Slic3r::GUI::MainFrame::extra_variables;
+            $sprint->placeholder_parser->set($_, $extra->{$_}) for keys %$extra;
+        }
+        
+         # select output file
+        my $output_file;
+        if ($params{reslice}) {
+            $output_file = $qs_last_output_file if defined $qs_last_output_file;
+        } elsif ($params{save_as}) {
+            $output_file = $sprint->expanded_output_filepath;
+            $output_file =~ s/\.gcode$/.svg/i if $params{export_svg};
+            my $dlg = Wx::FileDialog->new($self, 'Save ' . ($params{export_svg} ? 'SVG' : 'G-code') . ' file as:',
+                wxTheApp->output_path(dirname($output_file)),
+                basename($output_file), $params{export_svg} ? &Slic3r::GUI::FILE_WILDCARDS->{svg} : &Slic3r::GUI::FILE_WILDCARDS->{gcode}, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+            if ($dlg->ShowModal != wxID_OK) {
+                $dlg->Destroy;
+                return;
+            }
+            $output_file = Slic3r::decode_path($dlg->GetPath);
+            $qs_last_output_file = $output_file unless $params{export_svg};
+            $Slic3r::GUI::Settings->{_}{last_output_path} = dirname($output_file);
+            wxTheApp->save_settings;
+            $dlg->Destroy;
+        }
+        
+         # show processbar dialog
+        $progress_dialog = Wx::ProgressDialog->new('Slicing…', "Processing $input_file_basename…", 
+            100, $self, 0);
+        $progress_dialog->Pulse;
+        
+        {
+            my @warnings = ();
+            local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+            
+            $sprint->output_file($output_file);
+            if ($params{export_svg}) {
+                $sprint->export_svg;
+            } else {
+                $sprint->export_gcode;
+            }
+            $sprint->status_cb(undef);
+            Slic3r::GUI::warning_catcher($self)->($_) for @warnings;
+        }
+        $progress_dialog->Destroy;
+        undef $progress_dialog;
+        
+        
+	Wx::MessageDialog->new($self, "end  slicing  !", 'Error', wxOK | wxICON_ERROR)->ShowModal; 
+    # this method gets executed in a separate thread by wxWidgets since it's a button handler
+    Slic3r::thread_cleanup() if $Slic3r::have_threads;
+}
+
+
+#export stl
 sub export_stl {
     my $self = shift;
     
@@ -1815,5 +1924,8 @@ sub transform_thumbnail {
     
     $self->transformed_thumbnail($t);
 }
+
+ 
+
 
 1;

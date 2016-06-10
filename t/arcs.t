@@ -44,7 +44,7 @@ use Slic3r::Geometry qw(scaled_epsilon epsilon scale unscale X Y deg2rad);
     }
 }
 
-#==========================================================
+#===========================================================
 
 {
     my $path = Slic3r::Polyline->new_scale(
