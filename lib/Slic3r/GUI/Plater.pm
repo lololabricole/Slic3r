@@ -4,6 +4,8 @@ use warnings;
 use utf8;
 
 use File::Basename qw(basename dirname);
+use feature qw(say);
+use File::Basename qw(fileparse);
 use List::Util qw(sum first max);
 use Slic3r::Geometry qw(X Y Z MIN MAX scale unscale deg2rad);
 use threads::shared qw(shared_clone);
@@ -1272,25 +1274,36 @@ sub export_svg_ {
         $config->validate;             
         my $input_file;
         my $dir = $Slic3r::GUI::Settings->{recent}{skein_directory} || $Slic3r::GUI::Settings->{recent}{config_directory} || '';
-        if (!$params{reslice}) {
-        my $dialog = Wx::FileDialog->new($self, 'Choose a file to slice (STL/OBJ/AMF):', $dir, "", &Slic3r::GUI::MODEL_WILDCARD, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-            if ($dialog->ShowModal != wxID_OK) {
-                $dialog->Destroy;
-                return;
-            }
-            $input_file = Slic3r::decode_path($dialog->GetPaths);
-            $dialog->Destroy;
+        
+        
+        #my  update  	
+        if (!$params{reslice}) {     
+            my $default_output_file = $self->{print}->expanded_output_filepath($main::opt{output});
+            $input_file = $default_output_file;   
+            my $path = Slic3r::decode_path($input_file);
+            $Slic3r::GUI::Settings->{_}{last_output_path} = dirname($path);
+            wxTheApp->save_settings;
+            $self->{export_gcode_output_file} = $path;
+            $input_file =$path;
             $qs_last_input_file = $input_file unless $params{export_svg};
-        }
+         
+        }  
+        #update end  
          my $input_file_basename = basename($input_file);
         $Slic3r::GUI::Settings->{recent}{skein_directory} = dirname($input_file);
         wxTheApp->save_settings;
         
+        Wx::MessageDialog->new($self, $input_file ,"end  slicing  !",  wxOK | wxICON_ERROR)->ShowModal; 
+        my $oldfilename =  $input_file;
+        $oldfilename =~ s{\.[^.]*(?:\.gcode)?$}{.stl};          
+        $input_file = $oldfilename;
          my $print_center;
         {
             my $bed_shape = Slic3r::Polygon->new_scale(@{$config->bed_shape});
             $print_center = Slic3r::Pointf->new_unscale(@{$bed_shape->bounding_box->center});
         }
+        
+        
         
          my $sprint = Slic3r::Print::Simple->new(
             print_center    => $print_center,
@@ -1301,6 +1314,7 @@ sub export_svg_ {
             },
         );
         
+ 
         # keep model around
         my $model = Slic3r::Model->read_from_file($input_file);
         
@@ -1311,6 +1325,7 @@ sub export_svg_ {
             my $extra = $self->Slic3r::GUI::MainFrame::extra_variables;
             $sprint->placeholder_parser->set($_, $extra->{$_}) for keys %$extra;
         }
+        
         
          # select output file
         my $output_file;
