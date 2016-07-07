@@ -11,9 +11,9 @@ use Slic3r::Geometry qw(X Y Z X1 Y1 X2 Y2 MIN MAX PI scale unscale convex_hull);
 use Slic3r::Geometry::Clipper qw(diff_ex union_ex intersection_ex intersection offset
     offset2 union union_pt_chained JT_ROUND JT_SQUARE);
 use Slic3r::Print::State ':steps';
-
 our $status_cb;
-
+my @one;
+my @two;
 sub new {
     # TODO: port PlaceholderParser methods to C++, then its own constructor
     # can call them and no need for this new() method at all
@@ -109,7 +109,7 @@ sub export_svg {
         my $output_file = $self->expanded_output_filepath($params{output_file});
         $output_file =~ s/\.gcode$/.svg/i;
         Slic3r::open(\$fh, ">", $output_file) or die "Failed to open $output_file for writing\n";
-        print "Exporting to $output_file..." unless $params{quiet};
+        print "Exporting to $output_file..." unless $params{quiet};       
     }
     
     my $print_bb = $self->bounding_box;
@@ -123,6 +123,7 @@ sub export_svg {
   http://slic3r.org/
    -->
 EOF
+    #make foreach  here  to  read  all  files   
     
     my $print_polygon = sub {
         my ($polygon, $type) = @_;

@@ -45,6 +45,7 @@ use constant FILAMENT_CHOOSERS_SPACING => 0;
 use constant PROCESS_DELAY => 0.5 * 1000; # milliseconds
 
 my $PreventListEvents = 0;
+my @Fls;
 
 sub new {
     my $class = shift;
@@ -511,6 +512,8 @@ sub add {
     
     my @input_files = wxTheApp->open_model($self);
     $self->load_file($_) for @input_files;
+   # @Fls= @input_files;
+    push @Fls, @input_files;
 }
 
 sub load_file {
@@ -1263,6 +1266,8 @@ sub send_gcode {
     }
 }
 
+
+
 sub export_svg_ {
     my $self = shift;
      my %params = @_;
@@ -1275,25 +1280,32 @@ sub export_svg_ {
         my $input_file;
         my $dir = $Slic3r::GUI::Settings->{recent}{skein_directory} || $Slic3r::GUI::Settings->{recent}{config_directory} || '';
         
-        
+      
+          #import  all   files
+          foreach my $choice (@Fls){
+            my  $selected = $choice;
+          
+
         #my  update  	
         if (!$params{reslice}) {     
             my $default_output_file = $self->{print}->expanded_output_filepath($main::opt{output});
-            $input_file = $default_output_file;   
+            #$input_file = $default_output_file;   
+            $input_file =$selected;
             my $path = Slic3r::decode_path($input_file);
             $Slic3r::GUI::Settings->{_}{last_output_path} = dirname($path);
             wxTheApp->save_settings;
-            $self->{export_gcode_output_file} = $path;
-            $input_file =$path;
+            #$self->{export_gcode_output_file} = $path;
+            #$input_file =$path;
             $qs_last_input_file = $input_file unless $params{export_svg};
-         
+                       
         }  
         #update end  
          my $input_file_basename = basename($input_file);
         $Slic3r::GUI::Settings->{recent}{skein_directory} = dirname($input_file);
         wxTheApp->save_settings;
         
-        Wx::MessageDialog->new($self, $input_file ,"end  slicing  !",  wxOK | wxICON_ERROR)->ShowModal; 
+        #Wx::MessageDialog->new($self, $input_file ,"end  slicing  !",  wxOK | wxICON_ERROR)->ShowModal; 
+        
         my $oldfilename =  $input_file;
         $oldfilename =~ s{\.[^.]*(?:\.gcode)?$}{.stl};          
         $input_file = $oldfilename;
@@ -1303,8 +1315,7 @@ sub export_svg_ {
             $print_center = Slic3r::Pointf->new_unscale(@{$bed_shape->bounding_box->center});
         }
         
-        
-        
+          
          my $sprint = Slic3r::Print::Simple->new(
             print_center    => $print_center,
             status_cb       => sub {
@@ -1314,7 +1325,8 @@ sub export_svg_ {
             },
         );
         
- 
+        
+        
         # keep model around
         my $model = Slic3r::Model->read_from_file($input_file);
         
@@ -1373,6 +1385,8 @@ sub export_svg_ {
 	Wx::MessageDialog->new($self, "end  slicing  !", 'Error', wxOK | wxICON_ERROR)->ShowModal; 
     # this method gets executed in a separate thread by wxWidgets since it's a button handler
     Slic3r::thread_cleanup() if $Slic3r::have_threads;
+  }#endImport
+  
 }
 
 
